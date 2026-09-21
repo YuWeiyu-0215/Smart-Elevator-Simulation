@@ -5,7 +5,7 @@
 用法：
     python elevator_simulation.py            # 跑 1 个随机种子
     python elevator_simulation.py 20         # 跑 20 个随机种子，报均值±波动
-    python elevator_simulation.py 20 1.0     # 第 3 个参数 = 每人上下车耗时(秒)
+    python elevator_simulation.py 20 1.0     # 第 3 个参数 = 每人上下客耗时(秒)
 """
 
 import csv
@@ -42,9 +42,9 @@ JUNIORS_PER_FLOOR = 80
 DT = 0.2
 SEED = 42
 
-T_PAX = 0.0              # 每人上下车耗时（秒）。0 = 不计入；可设 1.0 做敏感性分析
+T_PAX = 0.0              # 每人上下客耗时（秒）。0 = 不计入；可设 1.0 做敏感性分析
 
-# 每隔多少秒重新评估一次尚未上车的呼梯，必要时改派更合适的电梯。
+# 每隔多少秒重新评估一次还在等电梯的呼梯，必要时改派更合适的电梯。
 # 设 0 = 派梯后不再重算。
 RE_EVAL_INTERVAL = 30
 
@@ -126,7 +126,7 @@ class Elevator:
     state: str = "idle"      # idle / moving / open / close
     timer: float = 0
 
-    onboard: list = field(default_factory=list)   # 车上的人
+    onboard: list = field(default_factory=list)   # 轿厢里的乘客
     requests: set = field(default_factory=set)    # 派给这台梯的呼梯（小组 id）
 
     open_count: int = 0
@@ -134,8 +134,8 @@ class Elevator:
     invalid_stops: int = 0
     moving_time: float = 0
 
-    departure_loads: list = field(default_factory=list)  # 每次离开楼层时车上有几人
-    silent_move: bool = False                            # 空车回 1 楼，不开门
+    departure_loads: list = field(default_factory=list)  # 每次离开楼层时轿厢里有几人
+    silent_move: bool = False                            # 空驶回 1 楼，不开门
     skip: set = field(default_factory=set)               # 短期内确认无人的楼层，本趟不再停靠
 
 
@@ -159,7 +159,7 @@ class Simulation:
         self.time = 0
         self.groups = {}
         self.order = []
-        self.pending = set()      # 还没上车的组 id
+        self.pending = set()      # 还没进入电梯的组 id
         self.skip_count = 0       # 传感器跳过开门的次数
 
         self.elevators = [Elevator(1), Elevator(2), Elevator(3)]
@@ -235,7 +235,7 @@ class Simulation:
 
         score = travel_time(elevator.floor, group.origin)
         score += len(self.get_stops(elevator)) * 4          # 中间还要停几次
-        score += sum(g.size for g in elevator.onboard) * 0.8  # 车上已经多少人
+        score += sum(g.size for g in elevator.onboard) * 0.8  # 轿厢里已经多少人
 
         if elevator.direction != 0:
             desired = 1 if group.origin > elevator.floor else -1
@@ -266,7 +266,7 @@ class Simulation:
             e.skip.clear()
 
     # --------------------------------------------------------
-    # 改造后：定期重新审视还没上车的呼梯
+    # 改造后：定期重新审视还在等电梯的呼梯
     # --------------------------------------------------------
 
     def re_evaluate(self):
@@ -319,11 +319,11 @@ class Simulation:
 
         stops = set()
 
-        # 车上的人的目的地 —— 永远要停
+        # 轿厢里乘客的目的地 —— 永远要停
         for g in elevator.onboard:
             stops.add(g.destination)
 
-        # 还没上车的人 —— 只停"顺路同方向"的
+        # 还在等电梯的人 —— 只停"顺路同方向"的
         for gid in elevator.requests:
             g = self.groups[gid]
 
@@ -424,7 +424,7 @@ class Simulation:
 
         elevator.onboard = [g for g in elevator.onboard if g not in dropped]
 
-        # ---- 2. 上客（返回上车人数）----
+        # ---- 2. 上客（返回进入轿厢的人数）----
         boarded = self.board(elevator)
 
         # ---- 3. 这一趟白停了吗 ----
@@ -440,7 +440,7 @@ class Simulation:
                 return
 
         # ---- 4. 开门 ----
-        # 停站时间 = 开关门时间 + 乘客上下车时间
+        # 停站时间 = 开关门时间 + 乘客上下客时间
         people_moving = sum(g.size for g in dropped) + boarded
 
         elevator.open_count += 1
@@ -455,7 +455,7 @@ class Simulation:
     # --------------------------------------------------------
 
     def board(self, elevator):
-        """把这一层能带上的人带上，返回上车人数。"""
+        """把这一层能带的乘客带上，返回上客人数。"""
 
         floor = elevator.floor
         left = CAPACITY - sum(g.size for g in elevator.onboard)
@@ -475,12 +475,12 @@ class Simulation:
                 continue
             if g.call_time > self.time:      # 还没刷闸机呢
                 continue
-            if g.elevator_id is not None:    # 已经上车了
+            if g.elevator_id is not None:    # 已经进入电梯
                 continue
             if not self.can_serve(elevator, g):
                 continue
 
-            # 车上有人的时候，只接同方向的人（不然车里的人会被带着乱跑）
+            # 轿厢里有人的时候，只接同方向的乘客（不然轿厢里的乘客会被带着乱跑）
             if elevator.onboard and elevator.direction != 0:
                 if elevator.direction != group_direction(g):
                     continue
@@ -530,7 +530,7 @@ class Simulation:
                 e.direction = -1
                 e.state = "moving"
 
-                # 空车调度归位属于移动，不是载客停靠，因此不开门
+                # 空驶调度归位属于移动，不是载客停靠，因此不开门
                 e.silent_move = True
 
                 e.timer = travel_time(e.floor, 1)
@@ -628,8 +628,8 @@ class Simulation:
 
     def metrics(self):
 
-        waits = []        # 从"按下按钮"到"上车"
-        gate_waits = []   # 从"刷闸机"到"上车"（更接近真实感受）
+        waits = []        # 从"按下按钮"到"进入电梯"
+        gate_waits = []   # 从"刷闸机"到"进入电梯"（更接近真实感受）
         rides = []
 
         waits_normal, waits_peak = [], []
@@ -935,7 +935,7 @@ def main():
     print("=" * 56)
     print("红豆斋宿舍楼电梯群控调度仿真系统")
     print("=" * 56)
-    print(f"随机种子数：{REPS}    每人上下车耗时：{T_PAX} s")
+    print(f"随机种子数：{REPS}    每人上下客耗时：{T_PAX} s")
     print("正在模拟，请稍等……")
 
     before_runs = []
