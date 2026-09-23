@@ -1,4 +1,4 @@
-![Banner](elevator_project.png)
+![Banner](banner.png)
 # 红豆斋宿舍楼电梯群控调度仿真系统
 
 > 基于仿真的电梯调度优化系统 —— 面向校园宿舍楼学生集中乘梯场景的运行仿真与改造效果评估。
